@@ -1,0 +1,57 @@
+#---
+#apiVersion: networking.k8s.io/v1
+#kind: NetworkPolicy
+#metadata:
+#  name: allow-notification-controller-to-git2oci
+#spec:
+#  egress:
+#  - {} # allow all egress for Flux's notification controller (setting any constraint blocks alerting or crahses the controller)
+#  podSelector:
+#    matchLabels:
+#      app: notification-controller
+#  policyTypes:
+#  - Egress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-git2oci-from-notification-controller
+spec:
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: notification-controller
+    - podSelector:
+        matchLabels:
+          app: sleep-pod
+    ports:
+    - port: 8000
+      protocol: TCP
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+apiVersion: notification.toolkit.fluxcd.io/v1
+kind: Provider
+metadata:
+  name: git2oci
+spec:
+  type: generic
+  address: http://git2oci.to-be-replaced.svc.cluster.local:8000 # provider works only if FQDN is specified as target address!
+
+---
+apiVersion: notification.toolkit.fluxcd.io/v1
+kind: Alert
+metadata:
+  name: git2oci
+spec:
+  eventMetadata:
+    summary: 'build and push OCI configuration no-dry-run'
+  providerRef:
+    name: git2oci
+  eventSources:
+  - kind: GitRepository
+    name: '*'

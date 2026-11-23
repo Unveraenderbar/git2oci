@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# * override patch has to be used in order to add HW resource requests
+# * output of shell in the pod is collected+printed by kubectl only *iff*
+#   * command is given in overrride patch
+#   * restart policy is not specified in the override patch, only in kubectl command line arguments
+#   * override patch is applied as strategic merge (*not* plain merge)
+
+artifactUrl="$(kubectl get -o 'jsonpath={.status.artifact.url}' gitrepository "$1")"
+registry="${2:-docker.io}"
+pushImage="$registry/fluxcd/flux-cli:v2.9.6"
+runImage="$registry/alpine/k8s:1.37.1"
+
+# shellcheck disable=SC1090
+[ -n "$GIT2OCI_CONF" ] && [ -f "$GIT2OCI_CONF" ] && source "$GIT2OCI_CONF"
+
+set -euxo pipefail
+
+overrides() {
+    local name="$1"; shift
+    tee /dev/stderr <<-EOF
+	{
+	  "metadata"      : {"annotations": {"sidecar.istio.io/inject": "false"}},
+	  "spec"          : {
+	      "containers"    : [{
+	          "command"     : ["/bin/sh", "+i", "+m", "+s", "-ec", "$*"],
+	          "env"         : [{"name": "HTTP_PROXY"}, {"name": "HTTPS_PROXY"}, {"name": "http_proxy"}, {"name": "https_proxy"}],
+	          "name"        : "$name",
+	          "resources"   : {"requests": {"cpu": "50m", "memory": "50Mi"}},
+	          "volumeMounts": [{
+	            "mountPath": "/etc/ssl/certs/config-trusted-cabundle.crt",
+	            "name"     : "config-trusted-cabundle",
+	            "subPath"  : "config-trusted-cabundle.crt"
+	          }]
+	      }],
+	  "serviceAccount": "kustomize-controller",
+	  "volumes"       : [ {
+	    "configMap": {
+	        "items": [{"key": "ca-bundle.crt", "path": "config-trusted-cabundle.crt"}],
+	        "name": "config-trusted-cabundle"
+	      },
+	      "name": "config-trusted-cabundle"
+	    }]
+	}}
+	EOF
+}
+
+getSecretData() {
+    kubectl get -o "jsonpath={.data.$1}" secret flux-system | base64 -d
+}
+
+runPod() {
+    # * kubectl sometimes emits
+    #   "warning: couldn't attach to pod/git2oci-run, falling back to streaming logs: unable to upgrade connection"
+    #   but this is probably only an artifact of polling the API server for the container to become ready,
+    # * it is not possible to pass the command to execute in the pod via stdin to "kubectl run...",
+    #   or the CLI arguments for kubectl – the command has to be set in the override patch
+    # * option "--stdin=true" has to be set for kubectl to wait for container output to become available
+    # * option "--restart=Never" has to be set for the pod to complete (i.e. otherwise the shell in the pod keeps running indefinitely)
+    # * option "--overrides=..." has to be set *before* "--quiet",  "--restart", and "--stdin"?!?
+    # * option "--override-type" has to be set to "strategic" – default "merge" does *not* work
+    local podName="git2oci-$1"
+    kubectl run --attach --quiet --restart=Never --stdin --override-type=strategic \
+                --overrides="$(overrides "$podName" "$3")" --image "$2" "$podName"
+}
+
+runCmd="cd /tmp; curl -s '$artifactUrl' | tar zxf -;
+        exec ./infrastructure/dehydrate $GIT2OCI_GIT_SAMPLE_CLUSTER $GIT2OCI_GIT_SAMPLE_NAMESPACE"
+pushCmd="exec flux push artifact -o json --reproducible \
+                   oci://$GIT2OCI_TARGET_REGISTRY/$GIT2OCI_SAMPLE_TARGET_CONF_IMAGE \
+                   --path=- --revision=d3c90f0172a1c0aa2a0057d70d376e6035077d9f \
+                   --source=https://$GIT2OCI_GIT_SERVICE/$GIT2OCI_SAMPLE_REPO \
+                   --certificate-authority=/etc/ssl/certs/config-trusted-cabundle.crt \
+                   '--creds=$(getSecretData username):$(getSecretData registrytoken)' --verbose"
+
+jq . <<<"$(overrides run  "$runCmd" )" >/dev/null
+jq . <<<"$(overrides push "$pushCmd")" >/dev/null
+
+kubectl delete --wait pod git2oci-push git2oci-run 1>&2 || true
+set -x
+runPod run "$runImage" "$runCmd" | runPod push "$pushImage" "$pushCmd"

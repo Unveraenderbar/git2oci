@@ -1,0 +1,102 @@
+---
+config:
+  flowchart:
+    curve: natural
+  theme: base
+  themeVariables:
+    fontSize:           "40px"
+    lineColor:          "blue"
+    primaryColor:       "white"
+    primaryTextColor:   "black"
+    primaryBorderColor: "#000000"
+
+---
+
+%% from https://stackoverflow.com/questions/79123430/rendering-icons-in-mermaid-architecture-diagram
+%% see https://icon-sets.iconify.design/ for searchable icon catalogue
+
+%% also no effect:
+%%{ init: { 'flowchart': { 'curve': 'natural' } } }%%
+flowchart LR
+
+subgraph git2ociArch[<font size="64px">git repository to OCI CM image architecture<br/><br/></font>]
+  direction TB
+
+  subgraph namespace["k8s cluster Flux system namespace"]
+    direction LR
+
+    subgraph git2oci["git2oci resources"]
+      direction RL
+      git2ociDepl@{img: "https://api.iconify.design/k8s/deployment.svg", label: "git2oci workload"          , pos: "b", w: 100, h: 100, constraint: "on" }
+      git2ociSvc@{ img: "https://api.iconify.design/k8s/service.svg"   , label: "git2oci namespaced service", pos: "b", w: 100, h: 100, constraint: "on" }
+      git2ociCM@{  img: "https://api.iconify.design/k8s/configmap.svg" , label: "git2oci configuration"     , pos: "b", w: 100, h: 100, constraint: "on" }
+    end
+
+    subgraph GOTK["Flux GOTK resources"]
+      notificationCtlr@{  img: "https://api.iconify.design/k8s/deployment.svg"              , label: "notification controller" , pos: "b", w: 100, h: 100, constraint: "on" }
+      sourceCtlr@{        img: "https://api.iconify.design/k8s/deployment.svg"              , label: "source controller"       , pos: "b", w: 100, h: 100, constraint: "on" }
+      kustomizationCtlr@{ img: "https://api.iconify.design/k8s/deployment.svg"              , label: "kustomization controller", pos: "b", w: 100, h: 100, constraint: "on" }
+      alertCR@{           img: "https://api.iconify.design/k8s/cloud-controller-manager.svg", label: "Alert custom resource"   , pos: "b", w: 100, h: 100, constraint: "on" }
+      providerCR@{        img: "https://api.iconify.design/k8s/cloud-controller-manager.svg", label: "Provider custom resource", pos: "b", w: 100, h: 100, constraint: "on" }
+    end
+  end
+
+  subgraph gitSvc[git version control service]
+
+    subgraph gitRepo["git repository"]
+      gitCommit@{  img: "https://api.iconify.design/ri/git-repository-commits-fill.svg", label: "git commit" , pos: "b", w: 100, h: 100, constraint: "on" }
+    end
+  end
+
+  subgraph ociRegistry[OCI image registry]
+
+    ociImage@{  img: "https://api.iconify.design/carbon/container-image.svg", label: "tagged OCI CM image" , pos: "b", w: 100, h: 100, constraint: "on" }
+  end
+
+end
+
+%%  0
+git2ociCM         ==>|"&lt;configures&gt;"|    git2ociDepl
+%%  1
+git2ociSvc        ==>|"&lt;exposes&gt;"   |    git2ociDepl
+
+%%  2
+notificationCtlr  ==>|"&lt;manages&gt;"|       alertCR
+%%  3
+notificationCtlr  ==>|"&lt;manages&gt;"|       providerCR
+%%  4
+notificationCtlr  ==>|"&lt;notifies&gt;"|      sourceCtlr
+%%  5
+sourceCtlr        ==>|"&lt;notifies&gt;"|      notificationCtlr
+%%  6
+alertCR           ====>|"&lt;triggers&gt;"|      git2ociDepl
+%%  7
+providerCR        ==>|"&lt;registers&gt;"|     git2ociSvc
+
+%%  8
+git2ociDepl       ==>|"&lt;fetches&gt;"|       sourceCtlr
+%%  9
+git2ociDepl       ==>|"&lt;pushes&gt;"|        ociImage
+%% 10
+gitRepo           ==>|"&lt;web hook POST&gt;"| notificationCtlr
+%% 11
+kustomizationCtlr ==>|"&lt;watches&gt;"|       ociImage
+%% 12
+ociImage          ==>|"&lt;pulls&gt;"|         kustomizationCtlr
+
+linkStyle 0,1,2,3,4,5,6,7,8 color:blue
+linkStyle 9,10,11,12        stroke:black
+
+classDef title               color:black    , fill:white, stroke:none
+classDef git2oci,git2ociElts color:darkgreen, fill:white, stroke:none
+classDef git2oci                                          stroke:darkgreen
+classDef default                                          stroke:black
+classDef gotk,gotkElts       color:blue      ,            stroke:none
+classDef gotk                                             stroke:blue
+
+class GOTK                                                             gotk
+class kustomizationCtlr,notificationCtlr,sourceCtlr,alertCR,providerCR gotkElts
+class git2oci,gitSvc,namespace,gitSvc,ociRegistry                      default
+class git2ociCM,git2ociDepl,git2ociSvc                                 git2ociElts
+class git2oci                                                          git2oci
+class git2ociArch                                                      title

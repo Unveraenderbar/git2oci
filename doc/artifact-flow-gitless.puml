@@ -1,0 +1,87 @@
+@startuml kubernetes
+' !include ~/PlantUML/C4/C4_Container.puml
+' needs Eclips elk-full.jar, not distributed with PlantUML JAR:
+' !pragma layout elk
+' resulting layout is the same as with default Graphviz/DOT, but ignores linetype spec:
+' !pragma layout smetana
+
+<style>
+arrow { LineThickness 2 }
+header { 
+    FontColor black
+    FontSize 24
+}
+</style>
+
+header GitOps Artifact Workflow „git-less”
+
+skinparam nodesep 50
+skinparam ranksep 50
+skinparam linetype polyline
+
+' Kubernetes
+!define KubernetesPuml ~/kubernetes-PlantUML/dist
+
+!include <material7/AccountUser/Account>
+
+!include KubernetesPuml/kubernetes_Common.puml
+!include KubernetesPuml/kubernetes_Context.puml
+!include KubernetesPuml/kubernetes_Simplified.puml
+
+!include KubernetesPuml/OSS/KubernetesApi.puml
+!include KubernetesPuml/OSS/KubernetesDeploy.puml
+!include KubernetesPuml/OSS/KubernetesSvc.puml
+!include KubernetesPuml/OSS/KubernetesPod.puml
+
+label "  <$mdiAccount{color=blue}>\nDeveloper"                                         as developer
+label "      <$mdiAccount{color=green}>\nInfra Engineer"                               as infraeng
+
+database "<b><size:18>Business logic code\ngit repository (Bitbucket)"                 as bl_repo
+database "<b><size:18>Infrastructure\n<b><size:18>as code\ngit repository (Bitbucket)" as iac_repo
+storage  "<b><size:18>Image Registry\n        (Artifactory)"                           as registry
+
+top to bottom direction
+
+' Kubernetes Components
+Cluster_Boundary(cluster, "Kubernetes Cluster") {
+    Namespace_Boundary(ci, "Continous Integration") {
+        rectangle "//CI Custom Resources//" {
+            KubernetesApi(Tekton, "Business logic\n<b><size:16>Pipeline", "")
+        }
+    }
+    Namespace_Boundary(go, "GitOps Automation") #line:green;text:green {
+        rectangle "//Source management//\n//Custom Resources//"  #line:green;text:green {
+            KubernetesApi(   GitOpsSrc  , "Fetch\n**+ Version management**"        , "") #text:green
+        }
+        rectangle "//Configuration management//\n//Workload//"   #line:green;text:green {
+            KubernetesDeploy(GitOpsCI   , "Configuration CI\n<size:16><b>Hydration", "") #text:green
+        }
+        rectangle "//Apply management//\n//Custom Resources//" #line:green;text:green {
+            KubernetesApi(   GitOpsApply, "Deployment"                             , "") #text:green
+        }
+    }
+    Namespace_Boundary(tgt, "Business logic instance") {
+        rectangle "//Business workload//" {
+            KubernetesDeploy(deployment, "Business service", "")
+        }
+    }
+}
+
+Rel(developer  , bl_repo    , "<git commit>"                     ,  "1")
+' Lay_Distance(developer, bl_repo, 3)
+Rel(bl_repo    , Tekton     , "<web hook>"                       ,  "2")
+Rel(Tekton     , registry   , "<business logic image push>"      ,  "3")
+Rel(infraeng   , iac_repo   , "<git commit>"                     ,  "4")
+Rel(iac_repo   , GitOpsSrc  , "<web hook>"                       ,  "5")
+'Rel(GitOpsSrc  , GitOpsCI   , "<notify>"                         ,  "6")
+' Order of following 2 arrows important:
+GitOpsCI  -u-> GitOpsSrc  #green;line.bold; : **<fetch>**\n//[6b]//
+GitOpsSrc -d-> GitOpsCI   #green;line.bold; : **<notify>**\n//[6a]//
+Rel(GitOpsCI   , registry   , "<OCI image push>"                 ,  "7")
+' Rel(registry   , GitOpsApply, "<OCI image pull>"                 ,  "8")
+GitOpsApply --> registry  #green;line.bold; : **<OCI image pull>**\n//[9]//
+' Rel(GitOpsApply, deployment , "<reconcile>"                      ,  "9")
+GitOpsApply <--> deployment  #green;line.bold; : **<OCI image reconcile>**\n//[9]//
+Rel(deployment , registry   , "<business logic image pull>"      , "10")
+Rel_Up(registry, deployment , "<business logic image deployment>", "11")
+@enduml

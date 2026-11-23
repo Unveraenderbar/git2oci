@@ -1,0 +1,79 @@
+@startuml kubernetes
+' needs Eclips elk-full.jar, not distributed with PlantUML JAR:
+' !pragma layout elk
+
+' !include ~/PlantUML/C4/C4_Container.puml
+
+<style>
+arrow { LineThickness 2 }
+header { 
+    FontColor black
+    FontSize 24
+}
+</style>
+
+header GitOps Artifact Workflow „vintage”
+
+' direction+linetype pragmas ignord by Eclipse+Smetana layout engine:
+skinparam linetype polyline
+skinparam nodesep 50
+skinparam ranksep 50
+
+' Kubernetes
+!define KubernetesPuml ~/kubernetes-PlantUML/dist
+
+!include <material7/AccountUser/Account>
+
+!include KubernetesPuml/kubernetes_Common.puml
+!include KubernetesPuml/kubernetes_Context.puml
+!include KubernetesPuml/kubernetes_Simplified.puml
+
+!include KubernetesPuml/OSS/KubernetesApi.puml
+!include KubernetesPuml/OSS/KubernetesDeploy.puml
+!include KubernetesPuml/OSS/KubernetesSvc.puml
+!include KubernetesPuml/OSS/KubernetesPod.puml
+
+label "  <$mdiAccount{color=blue}>\nDeveloper"                 as developer
+label "      <$mdiAccount{color=green}>\nInfra Engineer"       as infraeng
+
+database "Business logic code\ngit repository\n(Bitbucket)"    as bl_repo
+database "Infrastructure as code\ngit repository\n(Bitbucket)" as iac_repo
+storage  "<b><size:18>Image Registry\n        (Artifactory)"   as registry
+
+top to bottom direction
+
+' Kubernetes Components
+Cluster_Boundary(cluster, "Kubernetes Cluster") {
+Namespace_Boundary(ci, "Continous Integration") {
+    rectangle "CI Custom Resources//" {
+            KubernetesApi(CI, "Business Logic\n<b><size:16>Pipeline", "")
+        }
+    }
+    Namespace_Boundary(go, "GitOps Automation") #line:green;text:green {
+        rectangle "//Source management//\n//Custom Resources//"  #line:green;text:green {
+            KubernetesApi(GitOpsSrc  , "Fetch\n**+ Version management**", "") #text:green
+        }
+        rectangle "//Apply management//\n//Custom Resources//"  #line:green;text:green {
+            KubernetesApi(GitOpsApply, "Hydration\n**+ Deployment**"    , "") #text:green
+        }
+    }
+    Namespace_Boundary(tgt, "Business logic instance") {
+        rectangle {
+            KubernetesDeploy(deployment, "Business service", "")
+        }
+    }
+}
+
+Rel(developer  , bl_repo   , "<git commit>"                     , "1")
+' only available in C4-PlantUML:
+' Lay_Distance(developer, bl_repo, 3)
+Rel(bl_repo    , CI        , "<web hook>"                       , "2")
+Rel(CI         , registry  , "<business logic image push>"      , "3")
+Rel(infraeng   , iac_repo  , "<git commit>"                     , "4")
+Rel(iac_repo   , GitOpsSrc , "<web hook>"                       , "5")
+GitOpsApply -u-> GitOpsSrc   #green;line.bold;line.dashed; : **<pull>**\n//[6b]//
+GitOpsSrc   -d-> GitOpsApply #green;line.bold;line.dashed; : **<notify>**\n//[6a]//
+GitOpsApply <--> deployment  #green;line.bold;             : **<reconcile>**\n//[7]//
+Rel(deployment , registry  , "<business logic image pull>"      , "8")
+Rel_Up(registry, deployment, "<business logic image deployment>", "9")
+@enduml

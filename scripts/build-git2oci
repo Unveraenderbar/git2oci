@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# kubectl-related parameters:
+kubectlBaseUrl="https://dl.k8s.io/release"
+# kubectl v1.37.2 has vulnerability for critical CVE-2026-78663 (but this affects only the HTTP/2 server)...
+kubectlUrl="${KUBECTL_URL:-$kubectlBaseUrl/$(curl -Ls $kubectlBaseUrl/stable.txt)/bin/linux/amd64/kubectl}"
+# ... but oc 4.20 has CVE-2026-46595, CVE-2026-42508, CVE-2026-39834, CVE-2026-39833, CVE-2026-39831,
+# CVE-2026-39832, CVE-2026-39830, CVE-2026-33747 and CVE-2026-45570
+#kubectlUrl="https://downloads-openshift-console.apps.my-cluster.my-org/amd64/linux/oc.tar" # for RH OCP
+
+# shellcheck disable=SC1090
+[ -n "$GIT2OCI_CONF" ] && [ -r "$GIT2OCI_CONF" ] && source "$GIT2OCI_CONF"
+
+# image related parameters:
+case "${BASE_FLAVOUR:-ubi}" in
+'alpine')
+    baseImg="${GIT2OCI_TARGET_BASE_IMAGE:-docker.io/alpine:3.24}"
+    pkgInstall="${PKG_INSTALL:-apk upgrade -U --no-cache; apk add --no-cache}"
+    targetPackages="${TARGET_PKGS:-curl git python3}"                                      # Alpine python
+    #targetPackages="${TARGET_PKGS:-curl git python3 py3-requests iptables podman}"        # Alpine python + podman
+    #targetPackages="${TARGET_PKGS:-coreutils curl git jq socat}"                          # Alpine socat
+    ;;
+'ubi')
+    baseImg="$GIT2OCI_TARGET_BASE_IMAGE"
+    pkgInstall="${PKG_INSTALL:-microdnf update --nodocs -y; microdnf install --nodocs -y}" # UBI 10...
+    targetPackages="${TARGET_PKGS:-curl gettext git tar}"                                  # ... w/ gettext for envsubst
+    ;;
+*)
+    echo "invalid image flavor \"$BASE_FLAVOUR\", aborting" 1>&2
+    exit 3
+esac
+
+targetName="${TARGET_IMAGE_NAME:-${TARGET_NAME:-docker.io/git2oci}}"
+targetImg="$targetName:${TARGET_TAG:-latest}"
+
+# FluxCD related parameters:
+fluxVersion="${FLUX_VERSION:-2.10.0}"
+fluxUrl="${GITHUB_PROXY_URL:-https://github.com}/fluxcd/flux2/releases/download/v$fluxVersion/flux_${fluxVersion}_linux_amd64.tar.gz"
+
+# Binary officially distributed by cuelang as of v0.17.1 has vulnerabilities to CVE-2026-39821 and CVE-2026-56857,
+# which can be mitigated by compiling cue v0.18.0-rc.3 from sources w/ go1.27.3
+#cueUrl="${GITHUB_PROXY_URL:-https://github.com}/cue-lang/cue/releases/download/v0.17.1/cue_v0.17.1_linux_amd64.tar.gz"
+
+# Binary officially distributed by cuelang as of v0.17.1 has vulnerabilities to CVE-2026-39821 and CVE-2026-56857,
+# which can be mitigated by compiling cue v0.18.0-rc.3 from sources w/ go1.27.3
+#cueUrl="${GITHUB_PROXY_URL:-https://github.com}/cue-lang/cue/releases/download/v0.17.1/cue_v0.17.1_linux_amd64.tar.gz"
+
+set -euxo pipefail
+
+if [ -z "$(podman images --noheading "$targetImg")" ]; then # trigger rebuild of target image by deleting it
+    buildah rm "$targetName" || true
+    buildah rmi "$baseImg" "$targetImg" || true
+    buildah from --name "$targetName" "$baseImg"
+    ${TZ:+buildah config --env TZ="$TZ" "$targetName"}
+    ${https_proxy:+buildah config --env https_proxy="$https_proxy" "$targetName"}
+    buildah add --chmod 0555 "$targetName" "${CUE_SOURCE_PATH:-$HOME/go/bin/cue}" /usr/local/bin/cue
+    buildah run "$targetName" sh -exc \
+            "$pkgInstall $targetPackages
+             curl -sk $fluxUrl    | tar -oxzf - -C /usr/local/bin flux
+             curl -sk $kubectlUrl > /usr/local/bin/kubectl && chmod 0555 /usr/local/bin/kubectl
+             echo podman:1001140000:5000 > /etc/subgid
+             echo podman:1001140000:5000 > /etc/subuid"
+    buildah config --env 'http_proxy=-' --env 'https_proxy=-' --env 'HTTP_PROXY=-' --env 'HTTPS_PROXY=-' "$targetName"
+    buildah config --env 'XDG_CONFIG_HOME=/tmp' --env 'XDG_DATA_HOME=/tmp' --env 'XDG_RUNTIME_DIR=/tmp' "$targetName"
+    buildah commit --squash --rm "$targetName" "$targetImg"
+fi
+targetImgArchive="${TMPDIR:-/tmp}/$(echo "$targetImg" | tr /: --)"
+podman save "$targetImg" > "$targetImgArchive"
