@@ -1,0 +1,9 @@
+---
+apiVersion: builtin
+kind: ConfigMapGenerator
+metadata:
+  name: git2oci
+
+behavior: merge
+envs:
+- config

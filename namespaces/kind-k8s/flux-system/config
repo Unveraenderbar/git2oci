@@ -1,0 +1,21 @@
+# image for running git2oci deployment:
+GIT2OCI_IMAGE=docker.io/alpine/k8s:1.37.2
+
+# images for hydration runs / pushing hydrated resources to OCI registry (was alpine/k8s, changed to mitigate CVEs):
+GIT2OCI_PUSHER_IMAGE=docker.io/alpine/k8s:1.37.2
+GIT2OCI_RUNNER_IMAGE=docker.io/alpine/k8s:1.37.2
+
+# RE for checking that target image path in OCI registry belongs to git repository (=project) initiating the image push
+# (quoted so that this file can be sourced by shell, quotes are removed by git2oci service module):
+GIT2OCI_IMAGE_PATH_RE='^my-org/([^/])+/config(/\w+)'
+
+# Pull-through proxy URL for image builder script:
+GITHUB_PROXY_URL=
+
+# source registry for pulling workload+job images, only read access needed:
+GIT2OCI_IMAGE_REGISTRY=
+# target registry for built images, has to allow pushes to it:
+GIT2OCI_TARGET_REGISTRY=zot.zot:5000
+
+# base image to use for building deployment / runner / pusher images:
+GIT2OCI_TARGET_BASE_IMAGE=docker.io/alpine:3.9.6
